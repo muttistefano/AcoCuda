@@ -1,0 +1,3 @@
+/home/kolmogorov/cuda-workspace/AcoCuda/build/CMakeFiles/edit_cache.dir
+/home/kolmogorov/cuda-workspace/AcoCuda/build/CMakeFiles/rebuild_cache.dir
+/home/kolmogorov/cuda-workspace/AcoCuda/build/CMakeFiles/acocuda.dir
