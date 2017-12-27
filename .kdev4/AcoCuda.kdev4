@@ -21,3 +21,6 @@ Type=GCC
 
 [MakeBuilder]
 Number Of Jobs=8
+
+[Project]
+VersionControlSupport=kdevgit

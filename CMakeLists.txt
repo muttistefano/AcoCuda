@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.5.1)
+set (CMAKE_CXX_STANDARD 11)
 project(acocuda)
 
 find_package(CUDA REQUIRED)
@@ -6,7 +7,7 @@ set(
     CUDA_NVCC_FLAGS
     ${CUDA_NVCC_FLAGS};
 			-w 
--gencode arch=compute_50,code=sm_50
+-gencode arch=compute_50,code=sm_50 -std=c++11
 #    -O3 -gencode arch=compute_22,code=sm_22
 		  
 )
