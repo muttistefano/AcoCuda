@@ -286,6 +286,9 @@ acocuda_BINARY_DIR:STATIC=/home/kolmogorov/cuda-workspace/AcoCuda/build
 //Value Computed by CMake
 acocuda_SOURCE_DIR:STATIC=/home/kolmogorov/cuda-workspace/AcoCuda
 
+//Dependencies for target
+cudadevrt_LIB_DEPENDS:STATIC=
+
 
 ########################
 # INTERNAL cache entries

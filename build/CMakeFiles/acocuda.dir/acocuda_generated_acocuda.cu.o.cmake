@@ -70,7 +70,7 @@ set(generated_file_internal "/home/kolmogorov/cuda-workspace/AcoCuda/build/CMake
 set(generated_cubin_file_internal "/home/kolmogorov/cuda-workspace/AcoCuda/build/CMakeFiles/acocuda.dir//./acocuda_generated_acocuda.cu.o.cubin.txt") # path
 
 set(CUDA_NVCC_EXECUTABLE "/usr/local/cuda-9.1/bin/nvcc") # path
-set(CUDA_NVCC_FLAGS -w;-gencode;arch=compute_50,code=sm_50;-std=c++11 ;; ) # list
+set(CUDA_NVCC_FLAGS -w;-gencode;arch=compute_50,code=sm_50;-std=c++11;-rdc=true ;; ) # list
 # Build specific configuration flags
 set(CUDA_NVCC_FLAGS_DEBUG  ; )
 set(CUDA_NVCC_FLAGS_MINSIZEREL  ; )
@@ -78,7 +78,7 @@ set(CUDA_NVCC_FLAGS_RELEASE  ; )
 set(CUDA_NVCC_FLAGS_RELWITHDEBINFO  ; )
 set(nvcc_flags -m64) # list
 set(CUDA_NVCC_INCLUDE_ARGS "-I/usr/local/cuda-9.1/include;-I/usr/local/cuda-9.1/include") # list (needs to be in quotes to handle spaces properly).
-set(format_flag "-c") # string
+set(format_flag "-dc") # string
 set(cuda_language_flag ) # list
 
 if(build_cubin AND NOT generated_cubin_file)

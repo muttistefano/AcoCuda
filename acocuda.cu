@@ -17,25 +17,28 @@
 #include <ctime>
 #include <cstdlib>
 #define Infinity 65536
-#define randdouble() ((double)rand()/(double)RAND_MAX)
 #define randomize() srand((unsigned)time(NULL))
 #define index(length,line,column) (column + line * length)
 
 
 struct joints{
-    double joint1;
-    double joint2;
-    double joint3;
-    double joint4;
-    double joint5;
-    double joint6;
+    float joint1;
+    float joint2;
+    float joint3;
+    float joint4;
+    float joint5;
+    float joint6;
     bool ch = false;
-    double ph = 0.0;
+    float ph = 0.0;
 };
 
 
 //////////DEVICE FUNCTIONS
 
+__global__ void Update()
+{
+  printf("update\n");
+}
 
 __global__ void Cycle(int n_pnt,int n_conf,joints* dev_graph_ptr,unsigned int seed)
 {
@@ -44,26 +47,23 @@ __global__ void Cycle(int n_pnt,int n_conf,joints* dev_graph_ptr,unsigned int se
   int index = threadIdx.x + blockIdx.x * blockDim.x;
   int index_ch = index * n_pnt;
   float rnd_sel,prev_ph;
-  int choice=0;
+
+  __shared__ int sol[10000]; //controlla lunghezza o dynamic 
+//   int* sol = new int[n_pnt];
   
   curand_init(clock(),index,0, &state);
-  
-  //printf("index:%d\n",index);
-  
   
   for (int pnt=0 ; pnt<n_pnt ; pnt++)
   {
     prev_ph=0;
-    choice=0;
     rnd_sel=curand_uniform(&state);
-    printf("randomnum:%f  ",rnd_sel);
+    printf("randomnum:%f  \n",rnd_sel);
     for(int conf=0;conf<n_conf;conf++)
     {
       prev_ph=prev_ph+(*(dev_graph_ptr+pnt+conf*n_pnt)).ph;
       if(rnd_sel<prev_ph)
       {
-	choice=conf;
-	printf("%d \n",choice);
+	sol[threadIdx.x*n_pnt + pnt]=conf;
 	break;
       }
       
@@ -71,6 +71,28 @@ __global__ void Cycle(int n_pnt,int n_conf,joints* dev_graph_ptr,unsigned int se
 
   }
   
+  for(int gg=0;gg<n_pnt;gg++){
+    printf(" %d ",sol[threadIdx.x*n_pnt + gg]);
+  }
+  printf("\n ");
+  
+  __syncthreads();
+      printf("%d\n",threadIdx.x);
+  for(int q=0;q<n_conf*n_pnt;q++)
+  {
+//     if(threadIdx.x==fmod(threadIdx.x,n_pnt))
+    if(((int)(threadIdx.x/n_pnt))==sol[q*n_pnt + threadIdx.x%n_pnt])
+    {
+//       (*(dev_graph_ptr+threadIdx.x)).ph=(*(dev_graph_ptr+threadIdx.x)).ph*1.2; //ATOMIC
+      atomicAdd(&(*(dev_graph_ptr+threadIdx.x)).ph,1.0);
+//       printf("%d \n",q);
+    }
+    else
+    {
+//       (*(dev_graph_ptr+threadIdx.x)).ph=(*(dev_graph_ptr+threadIdx.x)).ph*1; //ATOMIC
+      atomicAdd(&(*(dev_graph_ptr+threadIdx.x)).ph,-0.2);
+    }
+  }
 }
 
 __global__ void print_matrix(joints* ptr,int n_points,int n_conf){
@@ -81,6 +103,7 @@ __global__ void print_matrix(joints* ptr,int n_points,int n_conf){
     }
 }
 
+
 ///////////CLASS
 
 
@@ -89,14 +112,12 @@ class AcoCuda
     int n_points;
     int n_conf;
     int n_ants;
-    
+
     thrust::host_vector<joints>   host_graph;
     thrust::host_vector<int>      host_path;
     thrust::device_vector<joints> device_graph;
     joints*                       device_graph_ptr;
-//     thrust::host_vector<double>   host_ph;
-//     thrust::device_vector<double> device_ph;
-//     double*                       device_ph_ptr;
+
     
   public:
 
@@ -125,18 +146,19 @@ AcoCuda::AcoCuda(int n_pointsex, int n_confex, int n_antsex)
 
 void AcoCuda::LoadGraph()
 {
+  srand(time(NULL));
   printf("points: %d\n",n_points);
   printf("config: %d\n",n_conf);
 
   for(thrust::host_vector<joints>::iterator j = host_graph.begin(); j != host_graph.end(); j++){
-    (*j).joint1=(double)rand()/(RAND_MAX/3);
-    (*j).joint2=(double)rand()/(RAND_MAX/3);
-    (*j).joint3=(double)rand()/(RAND_MAX/3);
-    (*j).joint4=(double)rand()/(RAND_MAX/3);
-    (*j).joint5=(double)rand()/(RAND_MAX/3);
-    (*j).joint6=(double)rand()/(RAND_MAX/3);
+    (*j).joint1=rand()/(RAND_MAX/3);
+    (*j).joint2=rand()/(RAND_MAX/3);
+    (*j).joint3=rand()/(RAND_MAX/3);
+    (*j).joint4=rand()/(RAND_MAX/3);
+    (*j).joint5=rand()/(RAND_MAX/3);
+    (*j).joint6=rand()/(RAND_MAX/3);
 
- if(rand()<(RAND_MAX*0.8)){
+ if(rand()<(RAND_MAX*0.6)){
       (*j).ch=true;
     }      
   
@@ -149,7 +171,7 @@ void AcoCuda::PhInit()
   float n_act;
   int ind;
   ind=0;
-  std::vector<double> ph_ind;
+  std::vector<float> ph_ind;
   ph_ind.clear();
   for(thrust::host_vector<joints>::iterator j = host_graph.begin(); j != host_graph.begin()+n_points; j++){
     n_act=0;
@@ -185,31 +207,34 @@ void AcoCuda::PhInit()
 
 void AcoCuda::RunCycle()
 {
-  Cycle<<< 1,1 >>>(n_points,n_conf,device_graph_ptr,time(NULL));//<<<blocks,thread>>>
-  cudaDeviceSynchronize();
+  Cycle<<<1,80 >>>(n_points,n_conf,device_graph_ptr,time(NULL));//<<<blocks,thread>>>
+  
 }
 
 void AcoCuda::RunPrint()
 {
   print_matrix<<< 1,1 >>>(this->device_graph_ptr,n_points,n_conf);
-//   cudaDeviceSynchronize();
 }
 
 ////////////MAIN
 
 int main(){
-  int viao=0;
-  
-
-  AcoCuda test(18,6,1000);//points,conf,ants
+ 
+  AcoCuda test(10,8,10);//points,conf,ants ---- MAX 128 pnt con 8 configurazioni per ora
 
   test.LoadGraph();
   test.PhInit();
   
   test.RunPrint();
-
+  cudaDeviceSynchronize();
+  
   test.RunCycle();
-
+  cudaDeviceSynchronize();
+  
+  test.RunPrint();
+  cudaDeviceSynchronize();
+  
+  printf("\nEnd\n");
   //test.print_matrix();
   
   return 0;

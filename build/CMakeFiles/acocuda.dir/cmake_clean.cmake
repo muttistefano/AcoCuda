@@ -1,5 +1,6 @@
 file(REMOVE_RECURSE
   "CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o"
+  "CMakeFiles/acocuda.dir/acocuda_intermediate_link.o"
   "acocuda.pdb"
   "acocuda"
 )
