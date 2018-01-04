@@ -858,7 +858,7 @@ CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: CMakeFiles/acocuda.dir/ac
 
 CMakeFiles/acocuda.dir/acocuda_intermediate_link.o: CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/kolmogorov/cuda-workspace/AcoCuda/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building NVCC intermediate link file CMakeFiles/acocuda.dir/acocuda_intermediate_link.o"
-	/usr/local/cuda-9.1/bin/nvcc -w -gencode arch=compute_50,code=sm_50 -std=c++11 -rdc=true -m64 -ccbin /usr/bin/cc -dlink /home/kolmogorov/cuda-workspace/AcoCuda/build/CMakeFiles/acocuda.dir//./acocuda_generated_acocuda.cu.o -o /home/kolmogorov/cuda-workspace/AcoCuda/build/CMakeFiles/acocuda.dir/./acocuda_intermediate_link.o
+	/usr/local/cuda-9.1/bin/nvcc -w -g -G -O0 -gencode arch=compute_50,code=sm_50 -std=c++11 -rdc=true -m64 -ccbin /usr/bin/cc -dlink /home/kolmogorov/cuda-workspace/AcoCuda/build/CMakeFiles/acocuda.dir//./acocuda_generated_acocuda.cu.o -o /home/kolmogorov/cuda-workspace/AcoCuda/build/CMakeFiles/acocuda.dir/./acocuda_intermediate_link.o
 
 # Object files for target acocuda
 acocuda_OBJECTS =

@@ -35,29 +35,55 @@ struct joints{
 
 //////////DEVICE FUNCTIONS
 
-__global__ void Update()
+/*__device__ double atomicMul(double* address, double val) 
+{ 
+ unsigned long long int* address_as_ull = (unsigned long long int*)address; 
+ unsigned long long int old = *address_as_ull, assumed; 
+ do { 
+ assumed = old; 
+ old = atomicCAS(address_as_ull, assumed, __double_as_longlong(val * __longlong_as_double(assumed))); 
+ } while (assumed != old);
+ return __longlong_as_double(old);
+}     */ 
+
+__device__ float atomicMul(float* address, float val) 
 {
-  printf("update\n");
+  int* address_as_int = (int*)address; 
+  int old = *address_as_int, assumed; 
+  do { 
+    assumed = old; 
+    old = atomicCAS(address_as_int, assumed, __float_as_int(val * 
+__float_as_int(assumed))); 
+ } while (assumed != old); return __int_as_float(old);
 }
 
-__global__ void Cycle(int n_pnt,int n_conf,joints* dev_graph_ptr,unsigned int seed)
+__global__ void Cycle(int n_pnt,int n_conf,int n_ants,joints* dev_graph_ptr,unsigned int seed)
 {
   curandState_t state;
 
   int index = threadIdx.x + blockIdx.x * blockDim.x;
   int index_ch = index * n_pnt;
-  float rnd_sel,prev_ph;
+  float rnd_sel,prev_ph,tot_ph;
 
   __shared__ int sol[10000]; //controlla lunghezza o dynamic 
 //   int* sol = new int[n_pnt];
   
   curand_init(clock(),index,0, &state);
   
-  for (int pnt=0 ; pnt<n_pnt ; pnt++)
+  for (int pnt=0 ; pnt<n_pnt ; pnt++) //PROBABILISTIC SELECTION IMPLEMENTATION
   {
     prev_ph=0;
+    tot_ph =0;
     rnd_sel=curand_uniform(&state);
-    printf("randomnum:%f  \n",rnd_sel);
+    
+    for(int cht=0;cht<n_conf;cht++)
+    {
+      tot_ph=tot_ph+(*(dev_graph_ptr+pnt+cht*n_pnt)).ph; //SHARED MEMORY <----
+    }
+    
+    rnd_sel = rnd_sel * tot_ph;
+//     printf("randomnum:%f  \n",rnd_sel);
+    
     for(int conf=0;conf<n_conf;conf++)
     {
       prev_ph=prev_ph+(*(dev_graph_ptr+pnt+conf*n_pnt)).ph;
@@ -66,31 +92,29 @@ __global__ void Cycle(int n_pnt,int n_conf,joints* dev_graph_ptr,unsigned int se
 	sol[threadIdx.x*n_pnt + pnt]=conf;
 	break;
       }
-      
     }
 
   }
-  
+  /*
   for(int gg=0;gg<n_pnt;gg++){
     printf(" %d ",sol[threadIdx.x*n_pnt + gg]);
-  }
-  printf("\n ");
+  }*/
+  printf(" %d ",sol[threadIdx.x*n_pnt]);
+//   printf("\n ");
   
   __syncthreads();
-      printf("%d\n",threadIdx.x);
-  for(int q=0;q<n_conf*n_pnt;q++)
+  
+  for(int q=0;q<n_ants;q++) //PH VALUE ADDING ---- n_threads α n_points ---- OPTIMIZE 
   {
-//     if(threadIdx.x==fmod(threadIdx.x,n_pnt))
-    if(((int)(threadIdx.x/n_pnt))==sol[q*n_pnt + threadIdx.x%n_pnt])
+    atomicAdd(&(*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph,0.1); //BOH
+//     atomicMul(&(*(dev_graph_ptr+threadIdx.x)).ph,1.02);
+  }
+  
+  for(int mm=0;mm<(int)((n_conf*n_pnt)/n_ants);mm++)  //FIX THIS FOR EVERY CASE 
+  {
+    if((*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph > 0.2 & (*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ch)
     {
-//       (*(dev_graph_ptr+threadIdx.x)).ph=(*(dev_graph_ptr+threadIdx.x)).ph*1.2; //ATOMIC
-      atomicAdd(&(*(dev_graph_ptr+threadIdx.x)).ph,1.0);
-//       printf("%d \n",q);
-    }
-    else
-    {
-//       (*(dev_graph_ptr+threadIdx.x)).ph=(*(dev_graph_ptr+threadIdx.x)).ph*1; //ATOMIC
-      atomicAdd(&(*(dev_graph_ptr+threadIdx.x)).ph,-0.2);
+      atomicAdd(&(*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph,-0.1);
     }
   }
 }
@@ -207,7 +231,7 @@ void AcoCuda::PhInit()
 
 void AcoCuda::RunCycle()
 {
-  Cycle<<<1,80 >>>(n_points,n_conf,device_graph_ptr,time(NULL));//<<<blocks,thread>>>
+  Cycle<<<1,n_ants >>>(n_points,n_conf,n_ants,device_graph_ptr,time(NULL));//<<<blocks,thread>>>
   
 }
 
@@ -228,9 +252,12 @@ int main(){
   test.RunPrint();
   cudaDeviceSynchronize();
   
-  test.RunCycle();
-  cudaDeviceSynchronize();
-  
+  for (int y=0;y<1;y++)
+  {
+    test.RunCycle();
+    cudaDeviceSynchronize();
+  }
+  printf("\n");
   test.RunPrint();
   cudaDeviceSynchronize();
   

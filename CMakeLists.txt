@@ -6,7 +6,7 @@ find_package(CUDA REQUIRED)
 set(
 CUDA_NVCC_FLAGS
 ${CUDA_NVCC_FLAGS};
--w 
+-w -g -G -O0
 -gencode arch=compute_50,code=sm_50 -std=c++11 -rdc=true
 # -03
 )
