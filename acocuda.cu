@@ -16,9 +16,8 @@
 #include <unistd.h>
 #include <ctime>
 #include <cstdlib>
-#define Infinity 65536
-#define randomize() srand((unsigned)time(NULL))
-#define index(length,line,column) (column + line * length)
+#include <stdint.h>
+typedef int32_t int32;
 
 
 struct joints{
@@ -33,29 +32,20 @@ struct joints{
 };
 
 
-//////////DEVICE FUNCTIONS
+//////////DEVICE FUNCTIONS 
 
-/*__device__ double atomicMul(double* address, double val) 
-{ 
- unsigned long long int* address_as_ull = (unsigned long long int*)address; 
- unsigned long long int old = *address_as_ull, assumed; 
- do { 
- assumed = old; 
- old = atomicCAS(address_as_ull, assumed, __double_as_longlong(val * __longlong_as_double(assumed))); 
- } while (assumed != old);
- return __longlong_as_double(old);
-}     */ 
 
-__device__ float atomicMul(float* address, float val) 
-{
-  int* address_as_int = (int*)address; 
-  int old = *address_as_int, assumed; 
-  do { 
-    assumed = old; 
-    old = atomicCAS(address_as_int, assumed, __float_as_int(val * 
-__float_as_int(assumed))); 
- } while (assumed != old); return __int_as_float(old);
+__device__ __forceinline__ float atomicMul(float* address, float val) {
+  int32* address_as_int = reinterpret_cast<int32*>(address);
+  int32 old = *address_as_int, assumed;
+  do {
+    assumed = old;
+    old = atomicCAS(address_as_int, assumed,
+                    __float_as_int(val * __int_as_float(assumed)));
+  } while (assumed != old);
+  return __int_as_float(old);
 }
+
 
 __global__ void Cycle(int n_pnt,int n_conf,int n_ants,joints* dev_graph_ptr,unsigned int seed)
 {
@@ -99,25 +89,26 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_ants,joints* dev_graph_ptr,unsi
   for(int gg=0;gg<n_pnt;gg++){
     printf(" %d ",sol[threadIdx.x*n_pnt + gg]);
   }*/
-  printf(" %d ",sol[threadIdx.x*n_pnt]);
+
 //   printf("\n ");
   
   __syncthreads();
   
   for(int q=0;q<n_ants;q++) //PH VALUE ADDING ---- n_threads α n_points ---- OPTIMIZE 
   {
-    atomicAdd(&(*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph,0.1); //BOH
-//     atomicMul(&(*(dev_graph_ptr+threadIdx.x)).ph,1.02);
+     atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph,1.2); 
   }
+  
   
   for(int mm=0;mm<(int)((n_conf*n_pnt)/n_ants);mm++)  //FIX THIS FOR EVERY CASE 
   {
-    if((*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph > 0.2 & (*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ch)
+    if((*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph > 0.01 & (*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ch)
     {
-      atomicAdd(&(*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph,-0.1);
+      atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph,0.9); //FIX
     }
   }
 }
+
 
 __global__ void print_matrix(joints* ptr,int n_points,int n_conf){
     for(int i=0; i < n_points*n_conf; ++i){
@@ -232,7 +223,6 @@ void AcoCuda::PhInit()
 void AcoCuda::RunCycle()
 {
   Cycle<<<1,n_ants >>>(n_points,n_conf,n_ants,device_graph_ptr,time(NULL));//<<<blocks,thread>>>
-  
 }
 
 void AcoCuda::RunPrint()
@@ -252,11 +242,12 @@ int main(){
   test.RunPrint();
   cudaDeviceSynchronize();
   
-  for (int y=0;y<1;y++)
+  for (int y=0;y<100;y++)
   {
     test.RunCycle();
     cudaDeviceSynchronize();
   }
+  
   printf("\n");
   test.RunPrint();
   cudaDeviceSynchronize();
