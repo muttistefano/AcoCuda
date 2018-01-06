@@ -40,8 +40,7 @@ __device__ __forceinline__ float atomicMul(float* address, float val) {
   int32 old = *address_as_int, assumed;
   do {
     assumed = old;
-    old = atomicCAS(address_as_int, assumed,
-                    __float_as_int(val * __int_as_float(assumed)));
+    old = atomicCAS(address_as_int, assumed, __float_as_int(val * __int_as_float(assumed)));
   } while (assumed != old);
   return __int_as_float(old);
 }
@@ -96,7 +95,10 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_ants,joints* dev_graph_ptr,unsi
   
   for(int q=0;q<n_ants;q++) //PH VALUE ADDING ---- n_threads α n_points ---- OPTIMIZE 
   {
+    if((*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph < 100 )
+    {
      atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph,1.2); 
+    }
   }
   
   
@@ -242,9 +244,12 @@ int main(){
   test.RunPrint();
   cudaDeviceSynchronize();
   
-  for (int y=0;y<100;y++)
+  for (int y=0;y<30;y++)
   {
     test.RunCycle();
+    cudaDeviceSynchronize();
+    printf("\n");
+    test.RunPrint();
     cudaDeviceSynchronize();
   }
   
