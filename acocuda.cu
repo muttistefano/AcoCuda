@@ -17,16 +17,11 @@
 #include <ctime>
 #include <cstdlib>
 #include <stdint.h>
-typedef int32_t int32;
+#include <cstdio>
 
 
 struct joints{
-    float joint1;
-    float joint2;
-    float joint3;
-    float joint4;
-    float joint5;
-    float joint6;
+    float jointsval[6];
     bool ch = false;
     float ph = 0.0;
 };
@@ -36,8 +31,8 @@ struct joints{
 
 
 __device__ __forceinline__ float atomicMul(float* address, float val) {
-  int32* address_as_int = reinterpret_cast<int32*>(address);
-  int32 old = *address_as_int, assumed;
+  int32_t* address_as_int = reinterpret_cast<int32_t*>(address);
+  int32_t old = *address_as_int, assumed;
   do {
     assumed = old;
     old = atomicCAS(address_as_int, assumed, __float_as_int(val * __int_as_float(assumed)));
@@ -45,79 +40,108 @@ __device__ __forceinline__ float atomicMul(float* address, float val) {
   return __int_as_float(old);
 }
 
+__device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts){
+  float phinc=0;
+  float nrm1[6];
+  float nrm2=0;
+  for(int e=0;e<npts-1;e++)
+  {
+    nrm1[0] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[0]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[0];
+    nrm1[1] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[1]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[1];
+    nrm1[2] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[2]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[2];
+    nrm1[3] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[3]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[3];
+    nrm1[4] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[4]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[4];
+    nrm1[5] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[5]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[5];
+    
+    nrm2 = 0.05*sqrt(nrm1[0]*nrm1[0]+nrm1[1]*nrm1[1]+nrm1[2]*nrm1[2]+nrm1[3]*nrm1[3]+nrm1[4]*nrm1[4]+nrm1[5]*nrm1[5]) ;
+    phinc = phinc + 1/nrm2;
+  }
+  *phobjpnt=phinc;
+}
 
-__global__ void Cycle(int n_pnt,int n_conf,int n_ants,joints* dev_graph_ptr,unsigned int seed)
+__global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,unsigned int seed,int n_cycles)
 {
   curandState_t state;
 
   int index = threadIdx.x + blockIdx.x * blockDim.x;
-  int index_ch = index * n_pnt;
+
   float rnd_sel,prev_ph,tot_ph;
 
-  __shared__ int sol[10000]; //controlla lunghezza o dynamic 
-//   int* sol = new int[n_pnt];
+  __shared__ int sol[10000]; //controlla lunghezza o dynamic
+  __shared__ float phobj[1000]; //uno per ogni formica se tutto il path viene agiornato con lo stesso ferormone
   
   curand_init(clock(),index,0, &state);
-  
-  for (int pnt=0 ; pnt<n_pnt ; pnt++) //PROBABILISTIC SELECTION IMPLEMENTATION
+  for(int cyc=0;cyc<n_cycles;cyc++) //CYCLE NUMBER
   {
-    prev_ph=0;
-    tot_ph =0;
-    rnd_sel=curand_uniform(&state);
     
-    for(int cht=0;cht<n_conf;cht++)
+    for (int pnt=0 ; pnt<n_pnt ; pnt++) //PROBABILISTIC SELECTION IMPLEMENTATION
     {
-      tot_ph=tot_ph+(*(dev_graph_ptr+pnt+cht*n_pnt)).ph; //SHARED MEMORY <----
+      prev_ph=0;
+      tot_ph =0;
+      rnd_sel=curand_uniform(&state);
+      
+      for(int cht=0;cht<n_conf;cht++)
+      {
+	tot_ph=tot_ph+(*(dev_graph_ptr+pnt+cht*n_pnt)).ph; //SHARED MEMORY <----
+      }
+      
+      rnd_sel = rnd_sel * tot_ph;
+      
+      for(int conf=0;conf<n_conf;conf++)
+      {
+	prev_ph=prev_ph+(*(dev_graph_ptr+pnt+conf*n_pnt)).ph;
+	if(rnd_sel<prev_ph)
+	{
+	  sol[threadIdx.x*n_pnt + pnt]=conf;
+	  break;
+	}
+      }
+
     }
     
-    rnd_sel = rnd_sel * tot_ph;
-//     printf("randomnum:%f  \n",rnd_sel);
+//     for(int gg=0;gg<n_pnt;gg++){
+//       printf(" %d ",sol[threadIdx.x*n_pnt + gg]);
+//     }
+
+  //   printf("\n ");
     
-    for(int conf=0;conf<n_conf;conf++)
+    __syncthreads();
+    
+    for(int q=0;q<n_threads;q++) //PH VALUE ADDING ---- n_threads α n_points ---- OPTIMIZE -- ora va solo se n_ant=n_points
     {
-      prev_ph=prev_ph+(*(dev_graph_ptr+pnt+conf*n_pnt)).ph;
-      if(rnd_sel<prev_ph)
+      if(threadIdx.x<=n_threads)
       {
-	sol[threadIdx.x*n_pnt + pnt]=conf;
-	break;
+	if((*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph < 900 )
+	{
+	  eval(sol,&phobj[threadIdx.x],dev_graph_ptr,n_pnt);
+//   	  printf("value : %f \n", phobj[threadIdx.x]);
+	  atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph,phobj[threadIdx.x]); 
+	}
       }
     }
-
-  }
-  /*
-  for(int gg=0;gg<n_pnt;gg++){
-    printf(" %d ",sol[threadIdx.x*n_pnt + gg]);
-  }*/
-
-//   printf("\n ");
-  
-  __syncthreads();
-  
-  for(int q=0;q<n_ants;q++) //PH VALUE ADDING ---- n_threads α n_points ---- OPTIMIZE 
-  {
-    if((*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph < 100 )
+    
+    
+    for(int mm=0;mm<(int)((n_conf*n_pnt)/n_threads);mm++)  //FIX THIS FOR EVERY CASE 
     {
-     atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph,1.2); 
+      if((*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph > 0.1 & (*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ch)
+      {
+	atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph,0.5); //FIX
+      }
     }
+    
   }
   
-  
-  for(int mm=0;mm<(int)((n_conf*n_pnt)/n_ants);mm++)  //FIX THIS FOR EVERY CASE 
-  {
-    if((*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph > 0.01 & (*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ch)
-    {
-      atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph,0.9); //FIX
-    }
-  }
 }
 
 
 __global__ void print_matrix(joints* ptr,int n_points,int n_conf){
-    for(int i=0; i < n_points*n_conf; ++i){
-        printf("%f ",ptr->ph);
-	if (i%n_points==(n_points-1)) printf("\n");
-        ptr++;
-    }
+  for(int i=0; i < n_points*n_conf; ++i){
+      if (ptr->ph < 100 & ptr->ph > 10) printf(" ");
+      if (ptr->ph < 10) printf("  ");
+      printf(" %.2f",ptr->ph);
+      if (i%n_points==(n_points-1)) printf("\n");
+      ptr++;
+  }
 }
 
 
@@ -128,17 +152,20 @@ class AcoCuda
 {
     int n_points;
     int n_conf;
-    int n_ants;
-
+    int n_threads;
+    int n_cycles;
+    int n_blocks;
+    
     thrust::host_vector<joints>   host_graph;
     thrust::host_vector<int>      host_path;
     thrust::device_vector<joints> device_graph;
     joints*                       device_graph_ptr;
+    joints*                       host_graph_ptr;
 
     
   public:
 
-    AcoCuda(int n_points,int n_conf,int n_ants);
+    AcoCuda(int n_points,int n_conf,int n_nths,int nblks,int ncyc);
     
     void LoadGraph();
     void PhInit();
@@ -147,16 +174,20 @@ class AcoCuda
     
     void RunCycle();
     void RunPrint();
+    void print_file();
 
 };
 
 ///////////CLASS METHODS
 
-AcoCuda::AcoCuda(int n_pointsex, int n_confex, int n_antsex)
+AcoCuda::AcoCuda(int n_pointsex, int n_confex,int nths, int nblks,int ncyc)
 {
-  n_ants=n_antsex;
   n_conf=n_confex;
   n_points=n_pointsex;
+  n_cycles=ncyc;
+  n_threads=nths;
+  n_blocks=nblks;
+  
   thrust::host_vector<joints> tmp(n_pointsex*n_confex);
   host_graph=tmp;
 }
@@ -166,16 +197,26 @@ void AcoCuda::LoadGraph()
   srand(time(NULL));
   printf("points: %d\n",n_points);
   printf("config: %d\n",n_conf);
+  printf("threads: %d\n",n_threads);
+  printf("blocks: %d\n",n_blocks);
+  printf("cycles: %d\n",n_cycles);
 
-  for(thrust::host_vector<joints>::iterator j = host_graph.begin(); j != host_graph.end(); j++){
-    (*j).joint1=rand()/(RAND_MAX/3);
-    (*j).joint2=rand()/(RAND_MAX/3);
-    (*j).joint3=rand()/(RAND_MAX/3);
-    (*j).joint4=rand()/(RAND_MAX/3);
-    (*j).joint5=rand()/(RAND_MAX/3);
-    (*j).joint6=rand()/(RAND_MAX/3);
-
- if(rand()<(RAND_MAX*0.6)){
+  for(thrust::host_vector<joints>::iterator j = host_graph.begin(); j != host_graph.end(); j++)
+  {
+    (*j).jointsval[0]=-20+static_cast <float> (rand()) / static_cast <float> (RAND_MAX/40);
+//     printf("1: %f\n",(*j).jointsval[0]);
+    (*j).jointsval[1]=-30+static_cast <float> (rand()) / static_cast <float> (RAND_MAX/60);
+//     printf("2: %f\n",(*j).jointsval[1]);
+    (*j).jointsval[2]=-30+static_cast <float> (rand()) / static_cast <float> (RAND_MAX/60);
+//     printf("3: %f\n",(*j).jointsval[2]);
+    (*j).jointsval[3]=-180+static_cast <float> (rand()) / static_cast <float> (RAND_MAX/360);
+//     printf("4: %f\n",(*j).jointsval[3]);
+    (*j).jointsval[4]=-180+static_cast <float> (rand()) / static_cast <float> (RAND_MAX/360);
+//     printf("5: %f\n",(*j).jointsval[4]);
+    (*j).jointsval[5]=-180+static_cast <float> (rand()) / static_cast <float> (RAND_MAX/360);
+//     printf("6: %f\n",(*j).jointsval[5]);
+  if(rand()<(RAND_MAX*0.6))
+    {
       (*j).ch=true;
     }      
   
@@ -216,7 +257,8 @@ void AcoCuda::PhInit()
 
    device_graph=host_graph;
    device_graph_ptr = thrust::raw_pointer_cast((device_graph.data()));
-//    device_graph_ptr = thrust::raw_pointer_cast(&device_graph[0]);
+   host_graph_ptr   = thrust::raw_pointer_cast((host_graph.data()));
+
 }
 
 
@@ -224,7 +266,7 @@ void AcoCuda::PhInit()
 
 void AcoCuda::RunCycle()
 {
-  Cycle<<<1,n_ants >>>(n_points,n_conf,n_ants,device_graph_ptr,time(NULL));//<<<blocks,thread>>>
+  Cycle<<<n_blocks,n_threads >>>(n_points,n_conf,n_threads,device_graph_ptr,time(NULL),n_cycles);//<<<blocks,thread>>>
 }
 
 void AcoCuda::RunPrint()
@@ -232,33 +274,57 @@ void AcoCuda::RunPrint()
   print_matrix<<< 1,1 >>>(this->device_graph_ptr,n_points,n_conf);
 }
 
+
+ void AcoCuda::print_file(){
+    FILE *fp;
+    fp = fopen("log.txt","w");
+    joints* ptr = this->host_graph_ptr;
+    for(int i=0; i < n_points*n_conf; ++i){
+        if (ptr->ph < 100 & ptr->ph > 10) printf(" ");
+        if (ptr->ph < 10) printf("  ");
+        fprintf(fp," %.2f",ptr->ph);
+	if (i%n_points==(n_points-1)) fprintf(fp,"\n");
+        ptr++;
+    }
+}
+
 ////////////MAIN
 
-int main(){
+int main(int argc, char *argv[]){
  
-  AcoCuda test(10,8,10);//points,conf,ants ---- MAX 128 pnt con 8 configurazioni per ora
-
+  int nth=15,nbl=0,ncyc=0;
+  
+  if(argc==4)
+  {
+    nth = strtol(argv[1], NULL, 10);
+    nbl = strtol(argv[2], NULL, 10);
+    ncyc= strtol(argv[3], NULL, 10);
+  }
+  else
+  {
+    nbl = 1;
+    ncyc= 50;
+  }
+  
+  AcoCuda test(15,8,nth,nbl,ncyc);//points,conf,threads,blocks ---- MAX 128 pnt con 8 configurazioni per ora ---- ants=threads
   test.LoadGraph();
   test.PhInit();
   
   test.RunPrint();
   cudaDeviceSynchronize();
   
-  for (int y=0;y<30;y++)
-  {
-    test.RunCycle();
-    cudaDeviceSynchronize();
-    printf("\n");
-    test.RunPrint();
-    cudaDeviceSynchronize();
-  }
-  
-  printf("\n");
-  test.RunPrint();
+
+  test.RunCycle();
   cudaDeviceSynchronize();
+
   
+  printf("Sol: \n");
+  test.RunPrint();
+  cudaDeviceSynchronize(); 
   printf("\nEnd\n");
-  //test.print_matrix();
+  
+  test.print_file();
+
   
   return 0;
 }
