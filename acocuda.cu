@@ -124,15 +124,15 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
     /*for(int mm=0;mm<(int)((n_conf*n_pnt)/n_threads);mm++)*/  //FIX THIS FOR EVERY CASE 
     for(int mm=0;mm<n_conf;mm++)
     {
-      if(threadIdx.x>n_pnt)
+      if(threadIdx.x<n_pnt) //più efficente 
       {
 	if((*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph > 0.1 & (*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ch)
 	{
-	  atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph,0.6); //FIX
+	  atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph,0.4); //FIX
 	}
       }
     }
-    
+
   }
   
 }
@@ -179,6 +179,7 @@ class AcoCuda
     void RunPrint();
     void print_file();
     void copytohost();
+
 
 };
 
@@ -337,7 +338,7 @@ void AcoCuda::copytohost()
 
 int main(int argc, char *argv[]){
  
-  int nth=15,nbl=0,ncyc=0;
+  int nth=15,nbl=1,ncyc=20;
   int pointsnumber=15;
   int configurations=8;
   if(argc==4)
@@ -346,11 +347,8 @@ int main(int argc, char *argv[]){
     nbl = strtol(argv[2], NULL, 10);
     ncyc= strtol(argv[3], NULL, 10);
   }
-  else
-  {
-    nbl = 1;
-    ncyc= 50;
-  }
+  
+  printf("size of joints : %d\n\n",sizeof(joints));
   
   if(pointsnumber>nth)
   {
@@ -358,25 +356,25 @@ int main(int argc, char *argv[]){
     return(0);
   }
   
-  AcoCuda test(pointsnumber,configurations,nth,nbl,ncyc);//points,conf,threads,blocks ---- MAX 128 pnt con 8 configurazioni per ora ---- ants=threads
+  AcoCuda test(pointsnumber,configurations,nth,nbl,ncyc);//points,conf,threads,blocks 
   test.LoadGraph();
   test.PhInit();
   
-  test.RunPrint();
-  cudaDeviceSynchronize();
-  
+//   test.RunPrint();
+//   cudaDeviceSynchronize();
+//   
 
   test.RunCycle();
   cudaDeviceSynchronize();
 
   
-  printf("Sol: \n");
-  test.RunPrint();
-  cudaDeviceSynchronize(); 
-  printf("\nEnd\n");
-  
+//   printf("Sol: \n");
+//   test.RunPrint();
+//   cudaDeviceSynchronize(); 
+//   printf("\nEnd\n");
+//   
   test.copytohost();
-  test.print_file();
+//   test.print_file();
 
   
   return 0;
