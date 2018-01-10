@@ -40,18 +40,18 @@ __device__ __forceinline__ float atomicMul(float* address, float val) {
   return __int_as_float(old);
 }
 
-__device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts){
+__device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts, int ncfg){
   float phinc=0;
   float nrm1[6];
   float nrm2=0;
   for(int e=0;e<npts-1;e++)
   {
-    nrm1[0] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[0]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[0];
-    nrm1[1] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[1]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[1];
-    nrm1[2] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[2]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[2];
-    nrm1[3] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[3]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[3];
-    nrm1[4] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[4]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[4];
-    nrm1[5] = (*(grp+e+npts*solptr[e+threadIdx.x*npts])).jointsval[5]-(*(grp+e+1+npts*solptr[e+threadIdx.x*npts+1])).jointsval[5];
+    nrm1[0] = (*(grp+e*ncfg+solptr[e+threadIdx.x*npts])).jointsval[0]-(*(grp+(e+1)*ncfg+solptr[e+threadIdx.x*npts+1])).jointsval[0];
+    nrm1[1] = (*(grp+e*ncfg*solptr[e+threadIdx.x*npts])).jointsval[1]-(*(grp+(e+1)*ncfg+solptr[e+threadIdx.x*npts+1])).jointsval[1];
+    nrm1[2] = (*(grp+e*ncfg*solptr[e+threadIdx.x*npts])).jointsval[2]-(*(grp+(e+1)*ncfg+solptr[e+threadIdx.x*npts+1])).jointsval[2];
+    nrm1[3] = (*(grp+e*ncfg*solptr[e+threadIdx.x*npts])).jointsval[3]-(*(grp+(e+1)*ncfg+solptr[e+threadIdx.x*npts+1])).jointsval[3];
+    nrm1[4] = (*(grp+e*ncfg*solptr[e+threadIdx.x*npts])).jointsval[4]-(*(grp+(e+1)*ncfg+solptr[e+threadIdx.x*npts+1])).jointsval[4];
+    nrm1[5] = (*(grp+e*ncfg*solptr[e+threadIdx.x*npts])).jointsval[5]-(*(grp+(e+1)*ncfg+solptr[e+threadIdx.x*npts+1])).jointsval[5];
     
     nrm2 = 0.05*sqrt(nrm1[0]*nrm1[0]+nrm1[1]*nrm1[1]+nrm1[2]*nrm1[2]+nrm1[3]*nrm1[3]+nrm1[4]*nrm1[4]+nrm1[5]*nrm1[5]) ;
     phinc = phinc + 1/nrm2;
@@ -61,16 +61,15 @@ __device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts){
 
 __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,unsigned int seed,int n_cycles)
 {
-  curandState_t state;
-
   int index = threadIdx.x + blockIdx.x * blockDim.x;
+  curandState_t state;
 
   float rnd_sel,prev_ph,tot_ph;
 
   __shared__ int sol[10000]; //controlla lunghezza o dynamic
   __shared__ float phobj[1000]; //uno per ogni formica se tutto il path viene agiornato con lo stesso ferormone
   
-  curand_init(clock(),index,0, &state);
+  curand_init(clock64(),index,0, &state);
   for(int cyc=0;cyc<n_cycles;cyc++) //CYCLE NUMBER
   {
     
@@ -79,17 +78,16 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
       prev_ph=0;
       tot_ph =0;
       rnd_sel=curand_uniform(&state);
-      
       for(int cht=0;cht<n_conf;cht++)
       {
-	tot_ph=tot_ph+(*(dev_graph_ptr+pnt+cht*n_pnt)).ph; //SHARED MEMORY <----
+	tot_ph=tot_ph+(*(dev_graph_ptr+pnt*n_conf+cht)).ph; //SHARED MEMORY <----
       }
       
       rnd_sel = rnd_sel * tot_ph;
       
       for(int conf=0;conf<n_conf;conf++)
       {
-	prev_ph=prev_ph+(*(dev_graph_ptr+pnt+conf*n_pnt)).ph;
+	prev_ph=prev_ph+(*(dev_graph_ptr+pnt*n_conf+conf)).ph;
 	if(rnd_sel<prev_ph)
 	{
 	  sol[threadIdx.x*n_pnt + pnt]=conf;
@@ -99,23 +97,28 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
 
     }
     
-//     for(int gg=0;gg<n_pnt;gg++){
-//       printf(" %d ",sol[threadIdx.x*n_pnt + gg]);
+//   if(threadIdx.x==0)//stampa soluzioni
+//   {
+//     for(int f=0;f<n_threads*n_pnt;f++)
+//     {
+//       if(f%(n_pnt)==0) printf("\n");
+//       printf("%d",sol[f]);
 //     }
+//     printf("\n ");
+//   }
 
-  //   printf("\n ");
     
     __syncthreads();
     
-    for(int q=0;q<n_threads;q++) //PH VALUE ADDING ---- n_threads α n_points ---- Ottimizza per fare lavorare tutti i thread assime
+    for(int q=0;q<n_threads;q++) //PH VALUE ADDING ---- n_threads α n_points ---- Ottimizza per fare lavorare tutti i thread assime(for q<n_pnts)
     {
       if(threadIdx.x<n_pnt)
       {
-	if((*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph < 1000 )
+	if((*(dev_graph_ptr+threadIdx.x*n_conf+sol[q*n_pnt+threadIdx.x])).ph < 1000 )
 	{
-	  eval(sol,&phobj[threadIdx.x],dev_graph_ptr,n_pnt);
-//   	  printf("value : %f \n", phobj[threadIdx.x]);
-	  atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*sol[q*n_pnt+threadIdx.x])).ph,phobj[threadIdx.x]); 
+	  eval(sol,&phobj[threadIdx.x],dev_graph_ptr,n_pnt,n_conf);
+//    	  printf("value : %f \n", phobj[threadIdx.x]);
+	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+sol[q*n_pnt+threadIdx.x])).ph,phobj[threadIdx.x]); 
 	}
       }
     }
@@ -126,9 +129,9 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
     {
       if(threadIdx.x<n_pnt) //più efficente 
       {
-	if((*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph > 0.1 & (*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ch)
+	if((*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph > 0.1 & (*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ch)
 	{
-	  atomicMul(&(*(dev_graph_ptr+threadIdx.x+n_pnt*mm)).ph,0.4); //FIX
+// 	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph,0.8); //FIX
 	}
       }
     }
@@ -140,10 +143,11 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
 
 __global__ void print_matrix(joints* ptr,int n_points,int n_conf){
   for(int i=0; i < n_points*n_conf; ++i){
+      if (ptr->ph < 1000 & ptr->ph > 100) printf(" ");
       if (ptr->ph < 100 & ptr->ph > 10) printf("  ");
       if (ptr->ph < 10) printf("   ");
       printf("  %.2f",ptr->ph);
-      if (i%n_points==(n_points-1)) printf("\n");
+      if (i%n_conf==(n_conf-1)) printf("\n");
       ptr++;
   }
 }
@@ -246,26 +250,28 @@ void AcoCuda::PhInit()
   ind=0;
   std::vector<float> ph_ind;
   ph_ind.clear();
-  for(thrust::host_vector<joints>::iterator j = host_graph.begin(); j != host_graph.begin()+n_points; j++){
+  for(thrust::host_vector<joints>::iterator j = host_graph.begin(); j != host_graph.end();){
     n_act=0;
     for (int u=0;u<n_conf;u++)
     {
-      n_act=n_act+(*(j+u*n_points)).ch;
+      n_act=n_act+(*j).ch;
+      j++;
     }
 //     printf("%d\n",n_act);
     n_act = 1/n_act;
     ph_ind.push_back(n_act);
   }
-  for(thrust::host_vector<joints>::iterator z = host_graph.begin(); z != host_graph.begin()+n_points; z++){
+  for(thrust::host_vector<joints>::iterator z = host_graph.begin(); z != host_graph.end();){
     
     for (int uu=0;uu<n_conf;uu++)
     {
-      if ((*(z+uu*n_points)).ch){
-	 (*(z+uu*n_points)).ph=ph_ind[ind];
+      if ((*z).ch){
+	 (*z).ph=ph_ind[ind];
       }
       else{
-	(*(z+uu*n_points)).ph=0;
+	(*z).ph=0;
       }
+      z++;
     }
     ind++;
   }
@@ -295,25 +301,25 @@ void AcoCuda::RunPrint()
     fp = fopen("log.txt","w");
 //     fprintf(fp,"");
     joints* ptr = this->host_graph_ptr;
-    for(int i=0; i < n_conf; i++)
+    for(int i=0; i < n_points; i++)
     {
       for(int k=0;k<6;k++)
       {
-        for(int j=0; j<n_points; j++)
+        for(int j=0; j<n_conf; j++)
 	{
-	  if ((*(ptr+j+n_points*i)).jointsval[k]>0){
-	  if ((*(ptr+j+n_points*i)).jointsval[k] < 1000 & (*(ptr+j+n_points*i)).jointsval[k] > 100) fprintf(fp,"  ");
-          if ((*(ptr+j+n_points*i)).jointsval[k] < 100 & (*(ptr+j+n_points*i)).jointsval[k] > 10) fprintf(fp,"   ");
-          if ((*(ptr+j+n_points*i)).jointsval[k] < 10) fprintf(fp,"    ");
+	  if ((*(ptr+j+n_conf*i)).jointsval[k]>0){
+	  if ((*(ptr+j+n_conf*i)).jointsval[k] < 1000 & (*(ptr+j+n_conf*i)).jointsval[k] > 100) fprintf(fp,"  ");
+          if ((*(ptr+j+n_conf*i)).jointsval[k] < 100 & (*(ptr+j+n_conf*i)).jointsval[k] > 10) fprintf(fp,"   ");
+          if ((*(ptr+j+n_conf*i)).jointsval[k] < 10) fprintf(fp,"    ");
 	  }
-	  if ((*(ptr+j+n_points*i)).jointsval[k]<0){
-	  if ((*(ptr+j+n_points*i)).jointsval[k] > -1000 & (*(ptr+j+n_points*i)).jointsval[k] < -100) fprintf(fp," ");
-          if ((*(ptr+j+n_points*i)).jointsval[k] > -100 & (*(ptr+j+n_points*i)).jointsval[k] < -10) fprintf(fp,"  ");
-          if ((*(ptr+j+n_points*i)).jointsval[k] > -10) fprintf(fp,"   ");
+	  if ((*(ptr+j+n_conf*i)).jointsval[k]<0){
+	  if ((*(ptr+j+n_conf*i)).jointsval[k] > -1000 & (*(ptr+j+n_conf*i)).jointsval[k] < -100) fprintf(fp," ");
+          if ((*(ptr+j+n_conf*i)).jointsval[k] > -100 & (*(ptr+j+n_conf*i)).jointsval[k] < -10) fprintf(fp,"  ");
+          if ((*(ptr+j+n_conf*i)).jointsval[k] > -10) fprintf(fp,"   ");
 	  
 	  }
-	  if ((*(ptr+j+n_points*i)).jointsval[k]==0) fprintf(fp,"    ");
-	  fprintf(fp,"  %.2f",(*(ptr+j+n_points*i)).jointsval[k]);
+	  if ((*(ptr+j+n_conf*i)).jointsval[k]==0) fprintf(fp,"    ");
+	  fprintf(fp,"  %.2f",(*(ptr+j+n_conf*i)).jointsval[k]);
 	}
 	fprintf(fp,"\n");
       }
@@ -321,10 +327,11 @@ void AcoCuda::RunPrint()
     }
     
     for(int z=0; z < n_points*n_conf; z++){
+    if (ptr->ph < 1000 & ptr->ph > 100) fprintf(fp," ");
     if (ptr->ph < 100 & ptr->ph > 10) fprintf(fp,"  ");
     if (ptr->ph < 10) fprintf(fp,"   ");
     fprintf(fp,"  %.2f",ptr->ph);
-    if (z%n_points==(n_points-1)) fprintf(fp,"\n");
+    if (z%n_conf==(n_conf-1)) fprintf(fp,"\n");
     ptr++;
 }
 }
@@ -350,31 +357,31 @@ int main(int argc, char *argv[]){
   
   printf("size of joints : %d\n\n",sizeof(joints));
   
-  if(pointsnumber>nth)
-  {
-    printf("Threads cannot be less than points(%d)",pointsnumber);
-    return(0);
-  }
+//   if(pointsnumber>nth)
+//   {
+//     printf("Threads cannot be less than points(%d)",pointsnumber);
+//     return(0);
+//   }
   
   AcoCuda test(pointsnumber,configurations,nth,nbl,ncyc);//points,conf,threads,blocks 
   test.LoadGraph();
   test.PhInit();
   
-//   test.RunPrint();
-//   cudaDeviceSynchronize();
-//   
+  test.RunPrint();
+  cudaDeviceSynchronize();
+  
 
   test.RunCycle();
   cudaDeviceSynchronize();
 
   
-//   printf("Sol: \n");
-//   test.RunPrint();
-//   cudaDeviceSynchronize(); 
-//   printf("\nEnd\n");
-//   
+  printf("Sol: \n");
+  test.RunPrint();
+  cudaDeviceSynchronize(); 
+  printf("\nEnd\n");
+  
   test.copytohost();
-//   test.print_file();
+  test.print_file();
 
   
   return 0;
