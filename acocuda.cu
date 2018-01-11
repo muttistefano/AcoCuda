@@ -18,7 +18,8 @@
 #include <cstdlib>
 #include <stdint.h>
 #include <cstdio>
-
+#include <sys/mman.h>
+//#define CUDA_CACHE_DISABLE 0
 
 struct joints{
     float jointsval[6];
@@ -29,8 +30,8 @@ struct joints{
 
 //////////DEVICE FUNCTIONS 
 
-
-__device__ __forceinline__ float atomicMul(float* address, float val) {
+__device__ __forceinline__ float atomicMul(float* address, float val)
+{
   int32_t* address_as_int = reinterpret_cast<int32_t*>(address);
   int32_t old = *address_as_int, assumed;
   do {
@@ -40,7 +41,8 @@ __device__ __forceinline__ float atomicMul(float* address, float val) {
   return __int_as_float(old);
 }
 
-__device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts, int ncfg){
+__device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts, int ncfg)
+{
   float phinc=0;
   float nrm1[6];
   float nrm2=0;
@@ -54,22 +56,24 @@ __device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts, int ncf
     nrm1[5] = (*(grp+e*ncfg*solptr[e+threadIdx.x*npts])).jointsval[5]-(*(grp+(e+1)*ncfg+solptr[e+threadIdx.x*npts+1])).jointsval[5];
     
     nrm2 = 0.05*sqrt(nrm1[0]*nrm1[0]+nrm1[1]*nrm1[1]+nrm1[2]*nrm1[2]+nrm1[3]*nrm1[3]+nrm1[4]*nrm1[4]+nrm1[5]*nrm1[5]) ;
-    phinc = phinc + 1/nrm2;
+    phinc = phinc + __fdividef(1, nrm2);// 1/nrm2;
   }
   *phobjpnt=phinc;
 }
 
 __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,unsigned int seed,int n_cycles)
 {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
-  curandState_t state;
+  //RANDOM GENERATOR INITIATION ------------------------------- CHECK
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  curandState_t state[5000];
+  curand_init(clock64() , tid, 0, &state[tid]);
 
+  
   float rnd_sel,prev_ph,tot_ph;
 
-  __shared__ int sol[10000]; //controlla lunghezza o dynamic
-  __shared__ float phobj[1000]; //uno per ogni formica se tutto il path viene agiornato con lo stesso ferormone
+  __shared__ int sol[1500]; //controlla lunghezza o dynamic
+  __shared__ float phobj[100]; //uno per ogni formica se tutto il path viene agiornato con lo stesso ferormone
   
-  curand_init(clock64(),index,0, &state);
   for(int cyc=0;cyc<n_cycles;cyc++) //CYCLE NUMBER
   {
     
@@ -77,7 +81,8 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
     {
       prev_ph=0;
       tot_ph =0;
-      rnd_sel=curand_uniform(&state);
+      rnd_sel=curand_uniform(&state[tid]);
+//       printf("sel: %f\n",rnd_sel);
       for(int cht=0;cht<n_conf;cht++)
       {
 	tot_ph=tot_ph+(*(dev_graph_ptr+pnt*n_conf+cht)).ph; //SHARED MEMORY <----
@@ -88,7 +93,7 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
       for(int conf=0;conf<n_conf;conf++)
       {
 	prev_ph=prev_ph+(*(dev_graph_ptr+pnt*n_conf+conf)).ph;
-	if(rnd_sel<prev_ph)
+	if(rnd_sel<=prev_ph)
 	{
 	  sol[threadIdx.x*n_pnt + pnt]=conf;
 	  break;
@@ -107,51 +112,48 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
 //     printf("\n ");
 //   }
 
-    
     __syncthreads();
     
-    for(int q=0;q<n_threads;q++) //PH VALUE ADDING ---- n_threads α n_points ---- Ottimizza per fare lavorare tutti i thread assime(for q<n_pnts)
+    if(threadIdx.x<n_pnt)
     {
-      if(threadIdx.x<n_pnt)
+      for(int q=0;q<n_threads;q++) //PH VALUE ADDING ---- n_threads α n_points ---- Ottimizza per fare lavorare tutti i thread assime(for q<n_pnts)
       {
 	if((*(dev_graph_ptr+threadIdx.x*n_conf+sol[q*n_pnt+threadIdx.x])).ph < 1000 )
 	{
-	  eval(sol,&phobj[threadIdx.x],dev_graph_ptr,n_pnt,n_conf);
+	  eval(sol,&phobj[threadIdx.x],dev_graph_ptr,n_pnt,n_conf); //check inf?
 //    	  printf("value : %f \n", phobj[threadIdx.x]);
-	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+sol[q*n_pnt+threadIdx.x])).ph,phobj[threadIdx.x]); 
+	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+sol[q*n_pnt+threadIdx.x])).ph,1.1);//phobj[threadIdx.x]); 
 	}
       }
     }
     
-    
-    /*for(int mm=0;mm<(int)((n_conf*n_pnt)/n_threads);mm++)*/  //FIX THIS FOR EVERY CASE 
-    for(int mm=0;mm<n_conf;mm++)
+//     if(threadIdx.x>=n_pnt && threadIdx.x<(n_pnt*2)) //il warp si divide :(
+    if(threadIdx.x<n_pnt)
     {
-      if(threadIdx.x<n_pnt) //più efficente 
+      for(int mm=0;mm<n_conf;mm++)
       {
-	if((*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph > 0.1 & (*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ch)
+	if((*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph > 0.1 && (*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ch)
 	{
-// 	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph,0.8); //FIX
+	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph,0.5); //FIX
 	}
       }
     }
-
+  __syncthreads();
   }
   
 }
 
-
-__global__ void print_matrix(joints* ptr,int n_points,int n_conf){
+__global__ void print_matrix(joints* ptr,int n_points,int n_conf)
+{
   for(int i=0; i < n_points*n_conf; ++i){
-      if (ptr->ph < 1000 & ptr->ph > 100) printf(" ");
-      if (ptr->ph < 100 & ptr->ph > 10) printf("  ");
+      if (ptr->ph < 1000 && ptr->ph > 100) printf(" ");
+      if (ptr->ph < 100 && ptr->ph > 10) printf("  ");
       if (ptr->ph < 10) printf("   ");
       printf("  %.2f",ptr->ph);
       if (i%n_conf==(n_conf-1)) printf("\n");
       ptr++;
   }
 }
-
 
 ///////////CLASS
 
@@ -206,9 +208,6 @@ void AcoCuda::LoadGraph()
   srand(time(NULL));
   printf("points: %d\n",n_points);
   printf("config: %d\n",n_conf);
-  printf("threads: %d\n",n_threads);
-  printf("blocks: %d\n",n_blocks);
-  printf("cycles: %d\n",n_cycles);
 
   for(thrust::host_vector<joints>::iterator j = host_graph.begin(); j != host_graph.end(); j++)
   {
@@ -287,6 +286,9 @@ void AcoCuda::PhInit()
 
 void AcoCuda::RunCycle()
 {
+  printf("threads: %d\n",n_threads);
+  printf("blocks: %d\n",n_blocks);
+  printf("cycles: %d\n",n_cycles);
   Cycle<<<n_blocks,n_threads >>>(n_points,n_conf,n_threads,device_graph_ptr,time(NULL),n_cycles);//<<<blocks,thread>>>
 }
 
@@ -308,13 +310,13 @@ void AcoCuda::RunPrint()
         for(int j=0; j<n_conf; j++)
 	{
 	  if ((*(ptr+j+n_conf*i)).jointsval[k]>0){
-	  if ((*(ptr+j+n_conf*i)).jointsval[k] < 1000 & (*(ptr+j+n_conf*i)).jointsval[k] > 100) fprintf(fp,"  ");
-          if ((*(ptr+j+n_conf*i)).jointsval[k] < 100 & (*(ptr+j+n_conf*i)).jointsval[k] > 10) fprintf(fp,"   ");
+	  if ((*(ptr+j+n_conf*i)).jointsval[k] < 1000 && (*(ptr+j+n_conf*i)).jointsval[k] > 100) fprintf(fp,"  ");
+          if ((*(ptr+j+n_conf*i)).jointsval[k] < 100 && (*(ptr+j+n_conf*i)).jointsval[k] > 10) fprintf(fp,"   ");
           if ((*(ptr+j+n_conf*i)).jointsval[k] < 10) fprintf(fp,"    ");
 	  }
 	  if ((*(ptr+j+n_conf*i)).jointsval[k]<0){
-	  if ((*(ptr+j+n_conf*i)).jointsval[k] > -1000 & (*(ptr+j+n_conf*i)).jointsval[k] < -100) fprintf(fp," ");
-          if ((*(ptr+j+n_conf*i)).jointsval[k] > -100 & (*(ptr+j+n_conf*i)).jointsval[k] < -10) fprintf(fp,"  ");
+	  if ((*(ptr+j+n_conf*i)).jointsval[k] > -1000 && (*(ptr+j+n_conf*i)).jointsval[k] < -100) fprintf(fp," ");
+          if ((*(ptr+j+n_conf*i)).jointsval[k] > -100 && (*(ptr+j+n_conf*i)).jointsval[k] < -10) fprintf(fp,"  ");
           if ((*(ptr+j+n_conf*i)).jointsval[k] > -10) fprintf(fp,"   ");
 	  
 	  }
@@ -327,8 +329,8 @@ void AcoCuda::RunPrint()
     }
     
     for(int z=0; z < n_points*n_conf; z++){
-    if (ptr->ph < 1000 & ptr->ph > 100) fprintf(fp," ");
-    if (ptr->ph < 100 & ptr->ph > 10) fprintf(fp,"  ");
+    if (ptr->ph < 1000 && ptr->ph > 100) fprintf(fp," ");
+    if (ptr->ph < 100 && ptr->ph > 10) fprintf(fp,"  ");
     if (ptr->ph < 10) fprintf(fp,"   ");
     fprintf(fp,"  %.2f",ptr->ph);
     if (z%n_conf==(n_conf-1)) fprintf(fp,"\n");
@@ -344,45 +346,54 @@ void AcoCuda::copytohost()
 ////////////MAIN
 
 int main(int argc, char *argv[]){
- 
-  int nth=15,nbl=1,ncyc=20;
-  int pointsnumber=15;
+  
+  float pointsnumber=18;
   int configurations=8;
-  if(argc==4)
-  {
-    nth = strtol(argv[1], NULL, 10);
-    nbl = strtol(argv[2], NULL, 10);
-    ncyc= strtol(argv[3], NULL, 10);
+  int nth=static_cast<int>(ceil(pointsnumber/16)*16); //32 or 16??
+  int nbl=static_cast<int>(2000/nth);
+  int ncyc=1;
+  if(argc==4){
+    pointsnumber=strtol(argv[1], NULL, 10);
+    nbl=strtol(argv[2], NULL, 10);
+    ncyc=strtol(argv[3], NULL, 10);
   }
   
-  printf("size of joints : %d\n\n",sizeof(joints));
   
-//   if(pointsnumber>nth)
-//   {
-//     printf("Threads cannot be less than points(%d)",pointsnumber);
-//     return(0);
-//   }
+  if(pointsnumber>nth)
+  {
+    printf("Threads cannot be less than points(%d)",pointsnumber);
+    exit(-2);
+  }
+   
   
-  AcoCuda test(pointsnumber,configurations,nth,nbl,ncyc);//points,conf,threads,blocks 
+  AcoCuda test(pointsnumber,configurations,nth,nbl,ncyc);//points,conf,threads,blocks,cycles
   test.LoadGraph();
   test.PhInit();
   
   test.RunPrint();
-  cudaDeviceSynchronize();
+  if (cudaSuccess != cudaDeviceSynchronize()) {
+    printf("ERROR in Print");
+    exit(-2);
+  }
   
 
   test.RunCycle();
-  cudaDeviceSynchronize();
+  if (cudaSuccess != cudaDeviceSynchronize()) {
+    printf("ERROR in Cycle");
+    exit(-2);
+  }
 
   
   printf("Sol: \n");
   test.RunPrint();
-  cudaDeviceSynchronize(); 
+  if (cudaSuccess != cudaDeviceSynchronize()) {
+    printf("ERROR in Print");
+    exit(-2);
+  }
   printf("\nEnd\n");
   
   test.copytohost();
   test.print_file();
-
   
   return 0;
 }
