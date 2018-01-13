@@ -55,24 +55,26 @@ __device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts, int ncf
     nrm1[4] = (*(grp+e*ncfg*solptr[e+threadIdx.x*npts])).jointsval[4]-(*(grp+(e+1)*ncfg+solptr[e+threadIdx.x*npts+1])).jointsval[4];
     nrm1[5] = (*(grp+e*ncfg*solptr[e+threadIdx.x*npts])).jointsval[5]-(*(grp+(e+1)*ncfg+solptr[e+threadIdx.x*npts+1])).jointsval[5];
     
-    nrm2 = 0.05*sqrt(nrm1[0]*nrm1[0]+nrm1[1]*nrm1[1]+nrm1[2]*nrm1[2]+nrm1[3]*nrm1[3]+nrm1[4]*nrm1[4]+nrm1[5]*nrm1[5]) ;
-    phinc = phinc + __fdividef(1, nrm2);// 1/nrm2;
+    nrm2 = sqrt(nrm1[0]*nrm1[0]+nrm1[1]*nrm1[1]+nrm1[2]*nrm1[2]+nrm1[3]*nrm1[3]+nrm1[4]*nrm1[4]+nrm1[5]*nrm1[5]) ;
+    phinc = phinc + __fdividef(1, nrm2);
   }
-  *phobjpnt=phinc;
+*phobjpnt=100*__fdividef(phinc,npts-1);
 }
 
-__global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,unsigned int seed,int n_cycles)
+__global__ void Cycle(int n_pnt,int n_conf,int n_threads,int n_blocks,joints* dev_graph_ptr,unsigned int seed,int n_cycles)
 {
-  //RANDOM GENERATOR INITIATION ------------------------------- CHECK
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  curandState_t state[5000];
-  curand_init(clock64() , tid, 0, &state[tid]);
-
   
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float rnd_sel,prev_ph,tot_ph;
-
-  __shared__ int sol[1500]; //controlla lunghezza o dynamic
-  __shared__ float phobj[100]; //uno per ogni formica se tutto il path viene agiornato con lo stesso ferormone
+  curandState_t state[5000];
+  extern __shared__ int shmem[];
+  int *sol             = (int *)&shmem;
+  float *phobj         = (float *)&shmem[n_pnt*n_threads];
+//   __shared__ int sol[8000];
+//   __shared__ float phobj[3000];
+  
+  curand_init(clock64() ,tid, 0, &state[tid]);
+  __syncthreads();
   
   for(int cyc=0;cyc<n_cycles;cyc++) //CYCLE NUMBER
   {
@@ -82,7 +84,6 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
       prev_ph=0;
       tot_ph =0;
       rnd_sel=curand_uniform(&state[tid]);
-//       printf("sel: %f\n",rnd_sel);
       for(int cht=0;cht<n_conf;cht++)
       {
 	tot_ph=tot_ph+(*(dev_graph_ptr+pnt*n_conf+cht)).ph; //SHARED MEMORY <----
@@ -101,43 +102,37 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
       }
 
     }
-    
-//   if(threadIdx.x==0)//stampa soluzioni
-//   {
-//     for(int f=0;f<n_threads*n_pnt;f++)
-//     {
-//       if(f%(n_pnt)==0) printf("\n");
-//       printf("%d",sol[f]);
-//     }
-//     printf("\n ");
-//   }
+    __syncthreads();
+    eval(sol,&phobj[threadIdx.x],dev_graph_ptr,n_pnt,n_conf);//calcolo ph per ogni percorso
 
+    printf("ph %d: %f\n",threadIdx.x,phobj[threadIdx.x]);
+    phobj[threadIdx.x]=threadIdx.x;
+    
     __syncthreads();
     
-    if(threadIdx.x<n_pnt)
-    {
-      for(int q=0;q<n_threads;q++) //PH VALUE ADDING ---- n_threads α n_points ---- Ottimizza per fare lavorare tutti i thread assime(for q<n_pnts)
-      {
-	if((*(dev_graph_ptr+threadIdx.x*n_conf+sol[q*n_pnt+threadIdx.x])).ph < 1000 )
-	{
-	  eval(sol,&phobj[threadIdx.x],dev_graph_ptr,n_pnt,n_conf); //check inf?
-//    	  printf("value : %f \n", phobj[threadIdx.x]);
-	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+sol[q*n_pnt+threadIdx.x])).ph,1.1);//phobj[threadIdx.x]); 
-	}
-      }
-    }
-    
-//     if(threadIdx.x>=n_pnt && threadIdx.x<(n_pnt*2)) //il warp si divide :(
     if(threadIdx.x<n_pnt)
     {
       for(int mm=0;mm<n_conf;mm++)
       {
 	if((*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph > 0.1 && (*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ch)
 	{
-	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph,0.5); //FIX
+	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph,0.1); //FIX
 	}
       }
     }
+    __syncthreads();
+    
+    if(threadIdx.x<n_pnt)
+    {
+      for(int q=0;q<n_threads;q++) 
+      {
+	if((*(dev_graph_ptr+threadIdx.x*n_conf+sol[q*n_pnt+threadIdx.x])).ph < 100000 )
+	{
+	  atomicAdd(&(*(dev_graph_ptr+threadIdx.x*n_conf+sol[q*n_pnt+threadIdx.x])).ph,phobj[q]); 
+	}
+      }
+    }
+    
   __syncthreads();
   }
   
@@ -174,8 +169,8 @@ class AcoCuda
     
   public:
 
-    AcoCuda(int n_points,int n_conf,int n_nths,int nblks,int ncyc);
-    
+    AcoCuda(int n_points,int n_conf,int ncyc);
+    ~AcoCuda(){};
     void LoadGraph();
     void PhInit();
     void Phrenew();
@@ -191,13 +186,15 @@ class AcoCuda
 
 ///////////CLASS METHODS
 
-AcoCuda::AcoCuda(int n_pointsex, int n_confex,int nths, int nblks,int ncyc)
+AcoCuda::AcoCuda(int n_pointsex, int n_confex,int ncyc)
 {
   n_conf=n_confex;
   n_points=n_pointsex;
   n_cycles=ncyc;
-  n_threads=nths;
-  n_blocks=nblks;
+  n_threads=static_cast<int>(ceil(static_cast<float>(n_points)/32)*32); //32 or 16??
+  n_blocks=1;
+  
+  cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
   
   thrust::host_vector<joints> tmp(n_pointsex*n_confex);
   host_graph=tmp;
@@ -282,6 +279,7 @@ void AcoCuda::PhInit()
 }
 
 
+
 /////////////METHODS 
 
 void AcoCuda::RunCycle()
@@ -289,14 +287,23 @@ void AcoCuda::RunCycle()
   printf("threads: %d\n",n_threads);
   printf("blocks: %d\n",n_blocks);
   printf("cycles: %d\n",n_cycles);
-  Cycle<<<n_blocks,n_threads >>>(n_points,n_conf,n_threads,device_graph_ptr,time(NULL),n_cycles);//<<<blocks,thread>>>
+  size_t shrbytes =(n_points*n_threads)*sizeof(int)+n_threads*sizeof(float);
+  printf("shared bytes: %lu\n",shrbytes);
+  Cycle<<<n_blocks,n_threads,shrbytes>>>(n_points,n_conf,n_threads,n_blocks,device_graph_ptr,time(NULL),n_cycles);//<<<blocks,thread>>>
+  if (cudaSuccess != cudaDeviceSynchronize()) {
+    printf("ERROR in Cycle\n");
+    exit(-2);
+  }
 }
 
 void AcoCuda::RunPrint()
 {
   print_matrix<<< 1,1 >>>(this->device_graph_ptr,n_points,n_conf);
+  if (cudaSuccess != cudaDeviceSynchronize()) {
+    printf("ERROR in Print\n");
+    exit(-2);
+  }
 }
-
 
  void AcoCuda::print_file(){
     FILE *fp;
@@ -346,54 +353,31 @@ void AcoCuda::copytohost()
 ////////////MAIN
 
 int main(int argc, char *argv[]){
-  
-  float pointsnumber=18;
+  float pointsnumber;
   int configurations=8;
-  int nth=static_cast<int>(ceil(pointsnumber/16)*16); //32 or 16??
-  int nbl=static_cast<int>(2000/nth);
-  int ncyc=1;
-  if(argc==4){
-    pointsnumber=strtol(argv[1], NULL, 10);
-    nbl=strtol(argv[2], NULL, 10);
-    ncyc=strtol(argv[3], NULL, 10);
-  }
   
+  pointsnumber=atof(argv[1]);
   
-  if(pointsnumber>nth)
-  {
-    printf("Threads cannot be less than points(%d)",pointsnumber);
-    exit(-2);
-  }
-   
+  int ncyc=50;
   
-  AcoCuda test(pointsnumber,configurations,nth,nbl,ncyc);//points,conf,threads,blocks,cycles
+  AcoCuda test(pointsnumber,configurations,ncyc);//points,conf,cycles
+  
   test.LoadGraph();
   test.PhInit();
   
-  test.RunPrint();
-  if (cudaSuccess != cudaDeviceSynchronize()) {
-    printf("ERROR in Print");
-    exit(-2);
-  }
-  
-
   test.RunCycle();
-  if (cudaSuccess != cudaDeviceSynchronize()) {
-    printf("ERROR in Cycle");
-    exit(-2);
-  }
 
+//   printf("Sol: \n");
   
-  printf("Sol: \n");
   test.RunPrint();
-  if (cudaSuccess != cudaDeviceSynchronize()) {
-    printf("ERROR in Print");
-    exit(-2);
-  }
-  printf("\nEnd\n");
+
+//   printf("\nEnd\n");
   
-  test.copytohost();
-  test.print_file();
+//   test.copytohost();
+  
+//   test.print_file();
+  
+  
   
   return 0;
 }
