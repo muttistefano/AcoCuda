@@ -206,6 +206,8 @@ SET(CUDA_NVCC_DEPEND
  "/usr/local/cuda-9.1/include/builtin_types.h"
  "/usr/local/cuda-9.1/include/channel_descriptor.h"
  "/usr/local/cuda-9.1/include/common_functions.h"
+ "/usr/local/cuda-9.1/include/cooperative_groups.h"
+ "/usr/local/cuda-9.1/include/cooperative_groups_helpers.h"
  "/usr/local/cuda-9.1/include/crt/common_functions.h"
  "/usr/local/cuda-9.1/include/crt/device_double_functions.h"
  "/usr/local/cuda-9.1/include/crt/device_double_functions.hpp"

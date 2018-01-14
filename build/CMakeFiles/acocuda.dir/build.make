@@ -264,6 +264,8 @@ CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/lib/gcc/x86_64-linux
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/local/cuda-9.1/include/builtin_types.h
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/local/cuda-9.1/include/channel_descriptor.h
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/local/cuda-9.1/include/common_functions.h
+CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/local/cuda-9.1/include/cooperative_groups.h
+CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/local/cuda-9.1/include/cooperative_groups_helpers.h
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/local/cuda-9.1/include/crt/common_functions.h
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/local/cuda-9.1/include/crt/device_double_functions.h
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/local/cuda-9.1/include/crt/device_double_functions.hpp

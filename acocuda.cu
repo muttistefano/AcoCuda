@@ -19,7 +19,9 @@
 #include <stdint.h>
 #include <cstdio>
 #include <sys/mman.h>
+#include <cooperative_groups.h>
 //#define CUDA_CACHE_DISABLE 0
+using namespace cooperative_groups;
 
 struct joints{
     float jointsval[6];
@@ -99,24 +101,24 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,int n_blocks,joints* de
 	  sol[threadIdx.x*n_pnt + pnt]=conf;
 	  break;
 	}
+	if(rnd_sel>prev_ph && conf==(n_conf-1)) printf("BIG ERROR\n");
       }
 
     }
     __syncthreads();
+    
     eval(sol,&phobj[threadIdx.x],dev_graph_ptr,n_pnt,n_conf);//calcolo ph per ogni percorso
 
-    printf("ph %d: %f\n",threadIdx.x,phobj[threadIdx.x]);
-    phobj[threadIdx.x]=threadIdx.x;
+    printf("ph %d %d: %f\n",blockIdx.x,threadIdx.x,phobj[threadIdx.x]);
     
-    __syncthreads();
-    
-    if(threadIdx.x<n_pnt)
+    if(tid<n_pnt)
     {
       for(int mm=0;mm<n_conf;mm++)
       {
-	if((*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph > 0.1 && (*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ch)
+	if((*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph > 0.2 && (*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ch)
 	{
-	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph,0.1); //FIX
+	  atomicMul(&(*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph,0.8); //FIX
+	  atomicAdd(&(*(dev_graph_ptr+threadIdx.x*n_conf+mm)).ph,0.01); //FIX
 	}
       }
     }
@@ -144,7 +146,7 @@ __global__ void print_matrix(joints* ptr,int n_points,int n_conf)
       if (ptr->ph < 1000 && ptr->ph > 100) printf(" ");
       if (ptr->ph < 100 && ptr->ph > 10) printf("  ");
       if (ptr->ph < 10) printf("   ");
-      printf("  %.2f",ptr->ph);
+      printf("  %.4f",ptr->ph);
       if (i%n_conf==(n_conf-1)) printf("\n");
       ptr++;
   }
@@ -194,7 +196,6 @@ AcoCuda::AcoCuda(int n_pointsex, int n_confex,int ncyc)
   n_threads=static_cast<int>(ceil(static_cast<float>(n_points)/32)*32); //32 or 16??
   n_blocks=1;
   
-  cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
   
   thrust::host_vector<joints> tmp(n_pointsex*n_confex);
   host_graph=tmp;
@@ -253,7 +254,6 @@ void AcoCuda::PhInit()
       n_act=n_act+(*j).ch;
       j++;
     }
-//     printf("%d\n",n_act);
     n_act = 1/n_act;
     ph_ind.push_back(n_act);
   }
@@ -358,24 +358,26 @@ int main(int argc, char *argv[]){
   
   pointsnumber=atof(argv[1]);
   
-  int ncyc=50;
+  int ncyc=atoi(argv[2]);;
   
   AcoCuda test(pointsnumber,configurations,ncyc);//points,conf,cycles
   
   test.LoadGraph();
   test.PhInit();
   
+  test.RunPrint();
+  
   test.RunCycle();
 
-//   printf("Sol: \n");
+  printf("Sol: \n");
   
   test.RunPrint();
 
-//   printf("\nEnd\n");
+  printf("\nEnd\n");
   
-//   test.copytohost();
+  test.copytohost();
   
-//   test.print_file();
+  test.print_file();
   
   
   
