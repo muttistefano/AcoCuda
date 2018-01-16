@@ -22,7 +22,7 @@
 #include <cstdio>
 #include <sys/mman.h>
 #include <cooperative_groups.h>
-
+typedef unsigned short int sint;
 
 struct joints{
     float jointsval[6];
@@ -44,7 +44,7 @@ __device__ __forceinline__ float atomicMul(float* address, float val)
   return __int_as_float(old);
 }
 
-__device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts, int ncfg)
+__device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts, int ncfg)// funzione obiettivo da personalizzare
 {
   float phinc=0;
   float nrm1[6]={0,0,0,0,0,0};
@@ -59,16 +59,9 @@ __device__ void eval(int* solptr,float* phobjpnt, joints* grp, int npts, int ncf
     nrm1[5] = (*(grp+e*ncfg+solptr[e+threadIdx.x*npts])).jointsval[5]-(*(grp+(e+1)*ncfg+solptr[e+(threadIdx.x*npts)+1])).jointsval[5];
     
     nrm2 = sqrt(nrm1[0]*nrm1[0]+nrm1[1]*nrm1[1]+nrm1[2]*nrm1[2]+nrm1[3]*nrm1[3]+nrm1[4]*nrm1[4]+nrm1[5]*nrm1[5]) ;
-    phinc = phinc + __fdividef(1, nrm2);
-//     printf("nrm 1 %d for %d sol %f %f\n",threadIdx.x,e,(*(grp+e*ncfg+solptr[e+threadIdx.x*npts])).jointsval[0]-(*(grp+(e+1)*ncfg+solptr[e+(threadIdx.x*npts)+1])).jointsval[0],nrm1[0]);
-//     printf("nrm 2 %d for %d sol %f %f\n",threadIdx.x,e,(*(grp+e*ncfg+solptr[e+threadIdx.x*npts])).jointsval[1]-(*(grp+(e+1)*ncfg+solptr[e+(threadIdx.x*npts)+1])).jointsval[1],nrm1[1]);
-//     printf("nrm 3 %d for %d sol %f %f\n",threadIdx.x,e,(*(grp+e*ncfg+solptr[e+threadIdx.x*npts])).jointsval[2]-(*(grp+(e+1)*ncfg+solptr[e+(threadIdx.x*npts)+1])).jointsval[2],nrm1[2]);
-//     printf("nrm 4 %d for %d sol %f %f\n",threadIdx.x,e,(*(grp+e*ncfg+solptr[e+threadIdx.x*npts])).jointsval[3]-(*(grp+(e+1)*ncfg+solptr[e+(threadIdx.x*npts)+1])).jointsval[3],nrm1[3]);
-//     printf("nrm 5 %d for %d sol %f %f\n",threadIdx.x,e,(*(grp+e*ncfg+solptr[e+threadIdx.x*npts])).jointsval[4]-(*(grp+(e+1)*ncfg+solptr[e+(threadIdx.x*npts)+1])).jointsval[4],nrm1[4]);
-//     printf("nrm 6 %d for %d sol %f %f\n",threadIdx.x,e,(*(grp+e*ncfg+solptr[e+threadIdx.x*npts])).jointsval[5]-(*(grp+(e+1)*ncfg+solptr[e+(threadIdx.x*npts)+1])).jointsval[5],nrm1[5]);
-//     
+    phinc = phinc + __fdividef(1, nrm2); 
   }
-*phobjpnt=100*__fdividef(phinc,npts-1);
+*phobjpnt=1000*__fdividef(phinc,npts-1);
 }
 
 __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,unsigned int seed,int n_cycles,float phmin,float phmax,float phdec)
@@ -114,6 +107,7 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
     __syncthreads();
     
     eval(sol,&phobj[threadIdx.x],dev_graph_ptr,n_pnt,n_conf); //calcolo ph per ogni soluzione totale
+//     printf("ph obj : %f\n",phobj[threadIdx.x]);
     
     if(threadIdx.x<n_pnt)
     {
@@ -144,17 +138,6 @@ __global__ void Cycle(int n_pnt,int n_conf,int n_threads,joints* dev_graph_ptr,u
   
 }
 
-__global__ void print_matrix(joints* ptr,int n_points,int n_conf)
-{
-  for(int i=0; i < n_points*n_conf; ++i){
-      if (ptr->ph < 1000 && ptr->ph > 100) printf(" ");
-      if (ptr->ph < 100 && ptr->ph > 10) printf("  ");
-      if (ptr->ph < 10) printf("   ");
-      printf("  %.4f",ptr->ph);
-      if (i%n_conf==(n_conf-1)) printf("\n");
-      ptr++;
-  }
-}
 
 ///////////CLASS
 
@@ -186,7 +169,6 @@ class AcoCuda
     void Phevaporate();
     
     void RunCycle();
-    void RunPrint();
     void print_file(bool jnts);
     void copytohost();
 
@@ -200,7 +182,7 @@ AcoCuda::AcoCuda(int n_pointsex, int n_confex,int ncyc,float phminex,float phmax
   n_conf=n_confex;
   n_points=n_pointsex;
   n_cycles=ncyc;
-  n_threads=static_cast<int>(ceil(static_cast<float>(n_points)/32)*32); //32 or 16??
+  n_threads=static_cast<int>(ceil(static_cast<float>(n_points)/64)*64); //32 or 16??
   n_blocks=1;
   phmin=phminex;
   phmax=phmaxex;
@@ -282,42 +264,31 @@ void AcoCuda::PhInit()
 
 /////////////METHODS 
 
-void AcoCuda::RunCycle()
+void AcoCuda::RunCycle() //launch cuda kernel 
 {
   printf("points: %d\n",n_points);
   printf("config: %d\n",n_conf);
   printf("threads: %d\n",n_threads);
   printf("blocks:  %d\n",n_blocks);
   printf("cycles:  %d\n",n_cycles);
+  printf("ph min: %f\n",phmin);
+  printf("ph max:  %f\n",phmax);
+  printf("ph evaporation:  %f\n",phdec);
   size_t shrbytes =(n_points*n_threads)*sizeof(int)+n_threads*sizeof(float);
   printf("shared bytes: %lu\n",shrbytes);
-  Cycle<<<n_blocks,n_threads,shrbytes>>>(n_points,n_conf,n_threads,device_graph_ptr,time(NULL),n_cycles,phmin,phmax,phdec);//<<<blocks,thread>>>
+  Cycle<<<n_blocks,n_threads,shrbytes>>>(n_points,n_conf,n_threads,device_graph_ptr,time(NULL),1,phmin,phmax,phdec);//<<<blocks,thread>>>
   if (cudaSuccess != cudaDeviceSynchronize()) {
     printf("ERROR in Cycle\n");
     exit(-2);
   }
 }
 
-void AcoCuda::RunPrint()
-{
-  print_matrix<<< 1,1 >>>(this->device_graph_ptr,n_points,n_conf);
-  if (cudaSuccess != cudaDeviceSynchronize()) {
-    printf("ERROR in Print\n");
-    exit(-2);
-  }
-}
-
-void AcoCuda::print_file(bool jnts)
+void AcoCuda::print_file(bool jnts) //log data to external file
 {
     FILE *fp;
-//     time_t _tm =time(NULL );
-
-//     struct tm * curtime = localtime ( &_tm );
-//     fp = fopen(asctime(curtime),"a");
     std::ostringstream name;
-    name << "pnt" << n_points << "cnf" << n_conf << "cyc" << n_cycles << "phmin" << phmin << "phmax" << phmax << "phdec" << phdec;
-    std::string var = oss.str();
-    fp = fopen("log/pnt","a");
+    name << "log/" << "pnt" << n_points << "cnf" << n_conf << "cyc" << n_cycles << "phmin" << phmin << "phmax" << phmax << "phdec" << phdec;
+    fp = fopen(name.str().c_str(),"a");
     joints* ptr = this->host_graph_ptr;
     if(0){ //fix this
       for(int i=0; i < n_points; i++)
@@ -357,7 +328,7 @@ void AcoCuda::print_file(bool jnts)
     fclose(fp);
 }
 
-void AcoCuda::copytohost()
+void AcoCuda::copytohost() //copy results from gpu to host
 {
   thrust::copy(this->device_graph.begin(),this->device_graph.end(),this->host_graph.begin());
   cudaDeviceSynchronize();
@@ -370,29 +341,22 @@ int main(int argc, char *argv[]){
   int configurations=10;
   
   pointsnumber=atof(argv[1]);
+//   int ncyc=atoi(argv[2]);;
+  int ncyc = 500;
   
-  int ncyc=atoi(argv[2]);;
-  
-  AcoCuda test(pointsnumber,configurations,1,0.15,1000,0.8);//points,conf,cycles,phmin,phmax,phdec
-  
-  test.LoadGraph();
-  test.PhInit();
-  
-//   test.RunPrint();
-  for (int t=0;t<ncyc;t++){
-    test.RunCycle();
-
-    printf("Sol: \n");
+  for(float gg=0.1;gg<=0.95;gg=gg+0.05){
+    AcoCuda test(pointsnumber,configurations,ncyc,0.15,2000,gg);//points,conf,cycles,phmin,phmax,phdec
     
-//     test.RunPrint();
-
-    printf("\nEnd\n");
+    test.LoadGraph();
+    test.PhInit();
     
-    test.copytohost();
-    
-    test.print_file(t==0);
+    for (int t=0;t<ncyc;t++){
+      test.RunCycle();
+      test.copytohost();
+      test.print_file(t==0);
+    }
+    test.~AcoCuda();
   }
-  
   
   return 0;
 }
