@@ -70,7 +70,7 @@ set(generated_file_internal "/home/kolmogorov/cuda-workspace/AcoCuda/build/CMake
 set(generated_cubin_file_internal "/home/kolmogorov/cuda-workspace/AcoCuda/build/CMakeFiles/acocuda.dir//./acocuda_generated_acocuda.cu.o.cubin.txt") # path
 
 set(CUDA_NVCC_EXECUTABLE "/usr/local/cuda-9.1/bin/nvcc") # path
-set(CUDA_NVCC_FLAGS -w;-g;-G;-O0;-gencode;arch=compute_50,code=sm_50;-std=c++11;-rdc=true ;; ) # list
+set(CUDA_NVCC_FLAGS -w;-g;-G;-O0;-use_fast_math;-prec-div=false;-prec-sqrt=false;-gencode;arch=compute_50,code=sm_50;-std=c++11;-rdc=true ;; ) # list
 # Build specific configuration flags
 set(CUDA_NVCC_FLAGS_DEBUG  ; )
 set(CUDA_NVCC_FLAGS_MINSIZEREL  ; )
