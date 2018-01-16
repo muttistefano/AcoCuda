@@ -158,6 +158,7 @@ class AcoCuda
     joints*                       device_graph_ptr;
     joints*                       host_graph_ptr;
 
+    size_t shrbytes;
     
   public:
 
@@ -182,11 +183,28 @@ AcoCuda::AcoCuda(int n_pointsex, int n_confex,int ncyc,float phminex,float phmax
   n_conf=n_confex;
   n_points=n_pointsex;
   n_cycles=ncyc;
-  n_threads=static_cast<int>(ceil(static_cast<float>(n_points)/64)*64); //32 or 16??
+  if(n_points<=96){
+    n_threads=static_cast<int>(ceil(static_cast<float>(n_points)/32)*32); //32 or 16??
+  }
+  else
+  {
+    n_threads=n_points;
+  }
   n_blocks=1;
   phmin=phminex;
   phmax=phmaxex;
   phdec=phdecex;
+  
+  printf("points: %d\n",n_points);
+  printf("config: %d\n",n_conf);
+  printf("threads: %d\n",n_threads);
+  printf("blocks:  %d\n",n_blocks);
+  printf("cycles:  %d\n",n_cycles);
+  printf("ph min: %f\n",phmin);
+  printf("ph max:  %f\n",phmax);
+  printf("ph evaporation:  %f\n",phdec);
+  this->shrbytes =(n_points*n_threads)*sizeof(int)+n_threads*sizeof(float);
+  printf("shared bytes: %lu \n",shrbytes);
   
   thrust::host_vector<joints> tmp(n_pointsex*n_confex);
   host_graph=tmp;
@@ -266,16 +284,6 @@ void AcoCuda::PhInit()
 
 void AcoCuda::RunCycle() //launch cuda kernel 
 {
-  printf("points: %d\n",n_points);
-  printf("config: %d\n",n_conf);
-  printf("threads: %d\n",n_threads);
-  printf("blocks:  %d\n",n_blocks);
-  printf("cycles:  %d\n",n_cycles);
-  printf("ph min: %f\n",phmin);
-  printf("ph max:  %f\n",phmax);
-  printf("ph evaporation:  %f\n",phdec);
-  size_t shrbytes =(n_points*n_threads)*sizeof(int)+n_threads*sizeof(float);
-  printf("shared bytes: %lu\n",shrbytes);
   Cycle<<<n_blocks,n_threads,shrbytes>>>(n_points,n_conf,n_threads,device_graph_ptr,time(NULL),1,phmin,phmax,phdec);//<<<blocks,thread>>>
   if (cudaSuccess != cudaDeviceSynchronize()) {
     printf("ERROR in Cycle\n");
