@@ -59,6 +59,7 @@ include CMakeFiles/acocuda.dir/flags.make
 
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: ../acocuda.cu
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: ../acocuda.cu
+CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: ../acocuda.h
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/include/_G_config.h
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/include/alloca.h
 CMakeFiles/acocuda.dir/acocuda_generated_acocuda.cu.o: /usr/include/asm-generic/errno-base.h

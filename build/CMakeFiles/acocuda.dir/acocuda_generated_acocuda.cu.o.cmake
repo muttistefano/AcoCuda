@@ -77,7 +77,7 @@ set(CUDA_NVCC_FLAGS_MINSIZEREL  ; )
 set(CUDA_NVCC_FLAGS_RELEASE  ; )
 set(CUDA_NVCC_FLAGS_RELWITHDEBINFO  ; )
 set(nvcc_flags -m64) # list
-set(CUDA_NVCC_INCLUDE_ARGS "-I/usr/local/cuda-9.1/include;-I/usr/local/cuda-9.1/include") # list (needs to be in quotes to handle spaces properly).
+set(CUDA_NVCC_INCLUDE_ARGS "-I/usr/local/cuda-9.1/include;-I/home/kolmogorov/cuda-workspace/AcoCuda/.;-I/usr/local/cuda-9.1/include") # list (needs to be in quotes to handle spaces properly).
 set(format_flag "-dc") # string
 set(cuda_language_flag ) # list
 
