@@ -22,7 +22,6 @@
 #include <cstdio>
 #include <sys/mman.h>
 #include <cooperative_groups.h>
-typedef unsigned short int sint;
 
 struct joints{
     float jointsval[6];
